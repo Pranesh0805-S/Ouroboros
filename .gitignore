@@ -6,3 +6,5 @@ build/
 *.log
 .DS_Store
 "@ | Out-File -Encoding utf8 .gitignore
+
+terminal logs.txt

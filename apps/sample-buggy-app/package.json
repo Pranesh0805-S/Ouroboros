@@ -1,0 +1,15 @@
+﻿{
+  "name": "sample-buggy-app",
+  "version": "1.0.0",
+  "description": "Ouroboros Phase 1 - intentionally buggy Express app used as the monitored 'production target'",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
+
