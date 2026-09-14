@@ -1,5 +1,6 @@
 const Incident = require('../models/Incident.model');
 const { classifyByRules } = require('../classifier/rules');
+const { classifyByLLM } = require('../classifier/llm-fallback');
 
 async function ingestIncident(req, res) {
   try {
@@ -20,19 +21,19 @@ async function ingestIncident(req, res) {
       context
     });
 
-    const ruleResult = classifyByRules(incident);
+    let result = classifyByRules(incident);
 
-    if (ruleResult) {
-      incident.classified_type = ruleResult.label;
-      incident.classification_source = ruleResult.source;
-      incident.status = 'classified';
-      await incident.save();
-    } else {
-      // No rule matched — this is where Phase 2's LLM fallback will kick in later
-      console.log(`No rule matched for incident ${incident._id}, needs LLM fallback`);
+    if (!result) {
+      console.log(`No rule matched for incident ${incident._id}, falling back to LLM...`);
+      result = await classifyByLLM(incident);
     }
 
-    console.log(`Incident ingested: ${incident.error_type} → classified as: ${incident.classified_type || 'UNCLASSIFIED'} (${incident._id})`);
+    incident.classified_type = result.label;
+    incident.classification_source = result.source;
+    incident.status = 'classified';
+    await incident.save();
+
+    console.log(`Incident ingested: ${incident.error_type} → classified as: ${incident.classified_type} (source: ${incident.classification_source}) (${incident._id})`);
 
     res.status(201).json({ success: true, incident });
   } catch (err) {
