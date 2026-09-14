@@ -12,7 +12,7 @@
 // instead of ((page - 1) * pageSize). This shifts every page forward by
 // one pageSize, so page 1 skips the first `pageSize` items entirely, and
 // the very last page silently comes back empty/short instead of erroring
-// (classic boundary bug â€” it doesn't crash, it just quietly returns
+// (classic boundary bug — it doesn't crash, it just quietly returns
 // wrong data, which is why it's dangerous).
 
 const express = require('express');
@@ -31,10 +31,13 @@ router.get('/', (req, res) => {
 
     const pageItems = items.slice(start, end);
 
-    // Detect + log the symptom: a non-final page that comes back empty
-    // or short is a strong signal something's off in the slice math.
-    const isLastPossiblePage = start < items.length;
-    if (pageItems.length === 0 && isLastPossiblePage) {
+    // Detect + log the symptom: a page that SHOULD have data (based on
+    // correct pagination math) but came back empty is a strong signal
+    // something's off in the slice math.
+    const correctlyComputedTotalPages = Math.ceil(items.length / pageSize);
+    const pageShouldHaveData = page <= correctlyComputedTotalPages;
+
+    if (pageItems.length === 0 && pageShouldHaveData) {
       logError({
         route: 'GET /api/items',
         errorType: 'off_by_one',
@@ -63,4 +66,3 @@ router.get('/', (req, res) => {
 });
 
 module.exports = router;
-
