@@ -1,6 +1,7 @@
 const Incident = require('../models/Incident.model');
 const { classifyByRules } = require('../classifier/rules');
 const { classifyByLLM } = require('../classifier/llm-fallback');
+const { storeIncidentEmbedding, findSimilarIncidents } = require('../services/incidentEmbedding');
 
 async function ingestIncident(req, res) {
   try {
@@ -35,6 +36,14 @@ async function ingestIncident(req, res) {
 
     console.log(`Incident ingested: ${incident.error_type} → classified as: ${incident.classified_type} (source: ${incident.classification_source}) (${incident._id})`);
 
+    // Phase 3: generate + store embedding for future similarity search
+    try {
+      await storeIncidentEmbedding(incident);
+      console.log(`Embedding stored for incident ${incident._id}`);
+    } catch (embedErr) {
+      console.error(`Embedding storage failed for incident ${incident._id}:`, embedErr.message);
+    }
+
     res.status(201).json({ success: true, incident });
   } catch (err) {
     console.error('Ingest error:', err.message);
@@ -52,4 +61,21 @@ async function getAllIncidents(req, res) {
   }
 }
 
-module.exports = { ingestIncident, getAllIncidents };
+async function getSimilarIncidents(req, res) {
+  try {
+    const incident = await Incident.findById(req.params.id);
+
+    if (!incident) {
+      return res.status(404).json({ error: 'Incident not found.' });
+    }
+
+    const similar = await findSimilarIncidents(incident);
+
+    res.json({ incident_id: incident._id, similar_incidents: similar });
+  } catch (err) {
+    console.error('Similarity search error:', err.message);
+    res.status(500).json({ error: 'Failed to find similar incidents.' });
+  }
+}
+
+module.exports = { ingestIncident, getAllIncidents, getSimilarIncidents };
