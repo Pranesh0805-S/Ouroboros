@@ -27,25 +27,31 @@ SOURCE FILE: ${relativePath}
 ${sourceCode}
 \`\`\`
 
-Respond with ONLY valid JSON, no markdown fences, no prose outside the JSON, in this exact shape:
-{
-  "explanation": "one or two sentences on what was wrong and how this fixes it",
-  "confidence_score": 0.0 to 1.0,
-  "patched_code": "the FULL corrected file contents, not just the changed lines"
-}`;
+Call the submit_patch tool with your fix.`;
 }
 
-// Claude sometimes wraps JSON in ```json fences despite instructions not to.
-// Strip them defensively rather than assume strict compliance.
-function extractJson(rawText) {
-  let cleaned = rawText.trim();
-
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```(json)?\s*/i, '').replace(/```\s*$/, '');
-  }
-
-  return cleaned.trim();
-}
+const PATCH_TOOL = {
+  name: 'submit_patch',
+  description: 'Submit the generated code patch for the bug.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      explanation: {
+        type: 'string',
+        description: 'One or two sentences on what was wrong and how this fixes it.',
+      },
+      confidence_score: {
+        type: 'number',
+        description: 'Confidence in the fix, from 0.0 to 1.0.',
+      },
+      patched_code: {
+        type: 'string',
+        description: 'The FULL corrected file contents, not just the changed lines.',
+      },
+    },
+    required: ['explanation', 'confidence_score', 'patched_code'],
+  },
+};
 
 async function generatePatch(incident) {
   const { relativePath, code } = getSourceFileForIncident(incident);
@@ -55,19 +61,19 @@ async function generatePatch(incident) {
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
-    max_tokens: 2000,
+    max_tokens: 8000,
+    tools: [PATCH_TOOL],
+    tool_choice: { type: 'tool', name: 'submit_patch' },
     messages: [{ role: 'user', content: prompt }],
   });
 
-  const rawText = response.content[0].text;
-  const cleaned = extractJson(rawText);
+  const toolUseBlock = response.content.find((block) => block.type === 'tool_use');
 
-  let parsed;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch (e) {
-    throw new Error(`Failed to parse LLM response as JSON: ${cleaned.slice(0, 300)}`);
+  if (!toolUseBlock) {
+    throw new Error('LLM did not call submit_patch tool as expected.');
   }
+
+  const parsed = toolUseBlock.input;
 
   return {
     target_file: relativePath,
