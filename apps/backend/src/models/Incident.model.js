@@ -9,7 +9,7 @@ const IncidentSchema = new mongoose.Schema({
   context: { type: mongoose.Schema.Types.Mixed },
   classified_type: { type: String, default: null },
   classification_source: { type: String, enum: ['rule', 'llm', null], default: null },
-  status: { type: String, enum: ['new', 'classified', 'patched', 'resolved'], default: 'new' },
+  status: { type: String, enum: ['new', 'classified', 'patched', 'resolved', 'tested'], default: 'new' },
 }, {
   timestamps: true
 });

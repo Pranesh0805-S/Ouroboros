@@ -6,7 +6,17 @@ const PatchSchema = new mongoose.Schema({
   target_file: { type: String, required: true },
   explanation: { type: String },
   confidence_score: { type: Number, default: null },
-  test_result: { type: String, enum: ['pending', 'passed', 'failed', null], default: 'pending' },
+  test_result: { type: String, enum: ['pending', 'passed', 'failed', 'error', 'timeout', null], default: 'pending' },
+  test_details: {
+    tests: Number,
+    pass: Number,
+    fail: Number,
+    durationMs: Number,
+    exitCode: Number,
+    testFile: String,
+    output: String,
+    ran_at: Date,
+  },
   deployed: { type: Boolean, default: false },
   outcome: { type: String, enum: ['success', 'reverted', 'pending'], default: 'pending' },
 }, {
