@@ -215,8 +215,61 @@ async function autoPatch(req, res) {
   }
 }
 
+const TARGET_RE = /^routes\/[A-Za-z0-9_-]+\.js$/;
+
+async function applyPatch(req, res) {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid patch id.' });
+    }
+    const patch = await Patch.findById(req.params.id);
+    if (!patch) return res.status(404).json({ error: 'Patch not found.' });
+
+    // safety gates: human approved AND sandbox passed AND not already applied
+    if (patch.approval_status !== 'approved') {
+      return res.status(400).json({ error: 'Only approved patches can be applied.' });
+    }
+    if (patch.test_result !== 'passed') {
+      return res.status(400).json({ error: 'Patch has not passed sandbox tests.' });
+    }
+    if (patch.deployed) {
+      return res.status(409).json({ error: 'Patch already applied.' });
+    }
+    if (!TARGET_RE.test(patch.target_file)) {
+      return res.status(400).json({ error: 'Invalid target_file.' });
+    }
+
+    const full = path.resolve(APP_ROOT, patch.target_file);
+    if (!full.startsWith(APP_ROOT + path.sep)) {
+      return res.status(400).json({ error: 'Invalid target_file.' });
+    }
+
+    // back up the original so Part 3 can roll back
+    patch.original_code = await fs.promises.readFile(full, 'utf8');
+    await fs.promises.writeFile(full, patch.generated_diff, 'utf8');
+
+    patch.deployed = true;
+    patch.deployed_at = new Date();
+    patch.outcome = 'pending'; // Part 3 sets success / reverted
+    await patch.save();
+
+    await Incident.findByIdAndUpdate(
+      patch.incident_id,
+      { status: 'resolved' },
+      { runValidators: true }
+    );
+
+    console.log(`Patch ${patch._id} applied to ${patch.target_file}`);
+    res.json({ success: true, patch });
+  } catch (err) {
+    console.error('Apply patch error:', err.message);
+    res.status(500).json({ error: 'Failed to apply patch.' });
+  }
+}
+
 module.exports = {
   createPatch,
+  applyPatch,
   getPatchesForIncident,
   testPatch,
   approvePatch,
