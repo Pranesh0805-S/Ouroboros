@@ -32,7 +32,7 @@ export default function Metrics() {
       <div className="cards">
         <div className="card"><div className="label">Total incidents</div><div className="value">{m.total_incidents}</div></div>
         <div className="card"><div className="label">Awaiting review</div><div className="value">{m.awaiting_review}</div></div>
-        <div className="card"><div className="label">Mean time to patch</div><div className="value">{formatDuration(m.mean_time_to_patch_ms)}</div></div>
+        <div className="card"><div className="label">Mean time to review</div><div className="value">{formatDuration(m.mean_time_to_review_ms)}</div></div>
       </div>
       <div className="cards">
         <Breakdown title="Incidents by status" data={m.incidents_by_status} />

@@ -15,6 +15,7 @@ export default function PatchReview() {
   const [selected, setSelected] = useState(0);
   const [original, setOriginal] = useState(null);
   const [similar, setSimilar] = useState(null);
+  const [similarError, setSimilarError] = useState(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
@@ -30,9 +31,11 @@ export default function PatchReview() {
       .then((r) => setIncident(r.data.incidents.find((i) => i._id === id) || null))
       .catch((e) => setError(errMsg(e)));
     loadPatches().catch((e) => setError(errMsg(e)));
+    setSimilar(null);
+    setSimilarError(null);
     client.get(`/incidents/${id}/similar`)
       .then((r) => setSimilar(r.data.similar_incidents || []))
-      .catch(() => setSimilar([]));
+      .catch((e) => { setSimilar([]); setSimilarError(errMsg(e)); });
   }, [id, loadPatches]);
 
   const patch = patches[selected];
@@ -160,7 +163,7 @@ export default function PatchReview() {
 
       <div className="card section">
         <div className="label">Similar past incidents</div>
-        <SimilarIncidents items={similar} />
+        <SimilarIncidents items={similar} error={similarError} />
       </div>
     </>
   );
