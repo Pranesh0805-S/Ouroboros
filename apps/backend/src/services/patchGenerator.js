@@ -4,12 +4,26 @@ const { findSimilarIncidents } = require('./incidentEmbedding');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-function buildPrompt({ incident, sourceCode, relativePath, similarIncidents }) {
+function buildPrompt({ incident, sourceCode, relativePath, similarIncidents, feedback }) {
   const similarSection = similarIncidents.length
     ? similarIncidents
         .map((s, i) => `${i + 1}. (similarity ${s.similarity.toFixed(3)}) ${s.error_signature}`)
         .join('\n')
     : 'None found.';
+
+  const feedbackSection = feedback
+    ? `
+PREVIOUS ATTEMPT FAILED THE SANDBOX TESTS
+Attempt #${feedback.attempt} produced this code:
+\`\`\`javascript
+${feedback.previousCode}
+\`\`\`
+Failing test output:
+${feedback.failureOutput}
+
+Fix the problems above. Keep the original behaviour that the tests expect (e.g. do not drop fields from responses).
+`
+    : '';
 
   return `You are an automated code-repair system. Given a bug report and the exact source file, generate a minimal, correct patch.
 
@@ -26,7 +40,7 @@ SOURCE FILE: ${relativePath}
 \`\`\`javascript
 ${sourceCode}
 \`\`\`
-
+${feedbackSection}
 Call the submit_patch tool with your fix.`;
 }
 
@@ -53,11 +67,11 @@ const PATCH_TOOL = {
   },
 };
 
-async function generatePatch(incident) {
+async function generatePatch(incident, feedback = null) {
   const { relativePath, code } = getSourceFileForIncident(incident);
   const similarIncidents = await findSimilarIncidents(incident, 3);
 
-  const prompt = buildPrompt({ incident, sourceCode: code, relativePath, similarIncidents });
+  const prompt = buildPrompt({ incident, sourceCode: code, relativePath, similarIncidents, feedback });
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
