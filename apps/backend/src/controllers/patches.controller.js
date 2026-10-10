@@ -5,6 +5,7 @@ const Incident = require('../models/Incident.model');
 const Patch = require('../models/Patch.model');
 const { generatePatch } = require('../services/patchGenerator');
 const { runPatchInSandbox } = require('../services/sandboxRunner');
+const { generateAndTestWithRetry } = require('../services/patchRetry');
 
 // apps/backend/src/controllers -> apps/sample-buggy-app
 const APP_ROOT = path.resolve(__dirname, '../../../sample-buggy-app');
@@ -166,6 +167,54 @@ async function getPatchOriginal(req, res) {
   }
 }
 
+async function autoPatch(req, res) {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid incident id.' });
+    }
+    const incident = await Incident.findById(req.params.id);
+    if (!incident) return res.status(404).json({ error: 'Incident not found.' });
+    if (!incident.classified_type) {
+      return res.status(400).json({ error: 'Incident has not been classified yet.' });
+    }
+
+    const { last, sandbox, attempts } = await generateAndTestWithRetry(incident);
+
+    const patch = await Patch.create({
+      incident_id: incident._id,
+      generated_diff: last.generated_diff,
+      target_file: last.target_file,
+      explanation: last.explanation,
+      confidence_score: last.confidence_score,
+      test_result: sandbox.status,
+      test_details: {
+        tests: sandbox.tests,
+        pass: sandbox.pass,
+        fail: sandbox.fail,
+        durationMs: sandbox.durationMs,
+        exitCode: sandbox.exitCode,
+        testFile: sandbox.testFile,
+        output: sandbox.output,
+        ran_at: new Date(),
+      },
+      attempts,
+    });
+
+    incident.status = sandbox.status === 'passed' ? 'tested' : 'patched';
+    await incident.save();
+
+    res.status(201).json({
+      success: true,
+      status: sandbox.status,
+      attempts_used: attempts.length,
+      patch,
+    });
+  } catch (err) {
+    console.error('Auto patch error:', err.message);
+    res.status(500).json({ error: 'Failed to auto-generate patch.' });
+  }
+}
+
 module.exports = {
   createPatch,
   getPatchesForIncident,
@@ -173,4 +222,5 @@ module.exports = {
   approvePatch,
   rejectPatch,
   getPatchOriginal,
+  autoPatch,
 };
