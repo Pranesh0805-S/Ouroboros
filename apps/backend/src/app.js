@@ -3,6 +3,7 @@ const cors = require('cors');
 const morgan = require('morgan');
 const incidentsRoutes = require('./routes/incidents.routes');
 const patchesRoutes = require('./routes/patches.routes');
+const metricsRoutes = require('./routes/metrics.routes');
 
 const app = express();
 
@@ -16,5 +17,6 @@ app.get('/health', (req, res) => {
 
 app.use('/api/incidents', incidentsRoutes);
 app.use('/api/patches', patchesRoutes);
+app.use('/api/metrics', metricsRoutes);
 
 module.exports = app;
