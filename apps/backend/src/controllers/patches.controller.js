@@ -100,4 +100,36 @@ async function testPatch(req, res) {
   }
 }
 
-module.exports = { createPatch, getPatchesForIncident, testPatch };
+async function reviewPatch(req, res, decision) {
+  try {
+    const patch = await Patch.findById(req.params.id);
+    if (!patch) {
+      return res.status(404).json({ error: 'Patch not found.' });
+    }
+
+    if (patch.approval_status && patch.approval_status !== 'pending') {
+      return res.status(409).json({ error: `Patch already ${patch.approval_status}.` });
+    }
+
+    // safety gate: only patches that passed the sandbox can be approved
+    if (decision === 'approved' && patch.test_result !== 'passed') {
+      return res.status(400).json({ error: 'Only patches that passed sandbox tests can be approved.' });
+    }
+
+    patch.approval_status = decision;
+    patch.review_note = req.body?.note || undefined;
+    patch.reviewed_at = new Date();
+    await patch.save();
+
+    console.log(`Patch ${patch._id} ${decision}`);
+    res.json({ success: true, patch });
+  } catch (err) {
+    console.error('Patch review error:', err.message);
+    res.status(500).json({ error: 'Failed to review patch.' });
+  }
+}
+
+const approvePatch = (req, res) => reviewPatch(req, res, 'approved');
+const rejectPatch = (req, res) => reviewPatch(req, res, 'rejected');
+
+module.exports = { createPatch, getPatchesForIncident, testPatch, approvePatch, rejectPatch };

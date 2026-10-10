@@ -17,6 +17,9 @@ const PatchSchema = new mongoose.Schema({
     output: String,
     ran_at: Date,
   },
+  approval_status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  review_note: { type: String },
+  reviewed_at: { type: Date },
   deployed: { type: Boolean, default: false },
   outcome: { type: String, enum: ['success', 'reverted', 'pending'], default: 'pending' },
 }, {
