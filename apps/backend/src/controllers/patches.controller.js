@@ -1,7 +1,13 @@
+const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
 const Incident = require('../models/Incident.model');
 const Patch = require('../models/Patch.model');
 const { generatePatch } = require('../services/patchGenerator');
 const { runPatchInSandbox } = require('../services/sandboxRunner');
+
+// apps/backend/src/controllers -> apps/sample-buggy-app
+const APP_ROOT = path.resolve(__dirname, '../../../sample-buggy-app');
 
 async function createPatch(req, res) {
   try {
@@ -102,6 +108,10 @@ async function testPatch(req, res) {
 
 async function reviewPatch(req, res, decision) {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid patch id.' });
+    }
+
     const patch = await Patch.findById(req.params.id);
     if (!patch) {
       return res.status(404).json({ error: 'Patch not found.' });
@@ -132,4 +142,35 @@ async function reviewPatch(req, res, decision) {
 const approvePatch = (req, res) => reviewPatch(req, res, 'approved');
 const rejectPatch = (req, res) => reviewPatch(req, res, 'rejected');
 
-module.exports = { createPatch, getPatchesForIncident, testPatch, approvePatch, rejectPatch };
+async function getPatchOriginal(req, res) {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid patch id.' });
+    }
+
+    const patch = await Patch.findById(req.params.id);
+    if (!patch) {
+      return res.status(404).json({ error: 'Patch not found.' });
+    }
+
+    const full = path.resolve(APP_ROOT, patch.target_file);
+    if (!full.startsWith(APP_ROOT + path.sep)) {
+      return res.status(400).json({ error: 'Invalid target_file.' });
+    }
+
+    const original = await fs.promises.readFile(full, 'utf8');
+    res.json({ target_file: patch.target_file, original });
+  } catch (err) {
+    console.error('Original file error:', err.message);
+    res.status(500).json({ error: 'Could not read original file.' });
+  }
+}
+
+module.exports = {
+  createPatch,
+  getPatchesForIncident,
+  testPatch,
+  approvePatch,
+  rejectPatch,
+  getPatchOriginal,
+};
