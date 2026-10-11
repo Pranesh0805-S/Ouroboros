@@ -2,7 +2,7 @@
 
 > A deployment pipeline that consumes its own failure history to heal itself.
 
-Ouroboros ingests production errors, classifies them, finds similar past incidents, asks an LLM for a candidate patch, tests that patch in an isolated Docker sandbox, and puts a human approval gate before anything ships.
+Ouroboros ingests production errors, classifies them, finds similar past incidents, asks an LLM for a candidate patch, tests that patch in an isolated Docker sandbox, and keeps a human approval gate before anything ships. When a patch fails the sandbox, the failing test output is fed back to the LLM for another try. After an approved patch is applied, the tests run again, and the change is rolled back automatically if they fail.
 
 ![Incident feed](docs/screenshots/incident-feed.png)
 ![Patch review](docs/screenshots/patch-review.png)
@@ -12,9 +12,14 @@ Ouroboros ingests production errors, classifies them, finds similar past inciden
 1. **Ingest**: errors from the sample app arrive at `POST /api/incidents/ingest`.
 2. **Classify**: rules first, LLM fallback. Types include `null_pointer`, `memory_leak`, `rate_limit`, `off_by_one` and `config_drift`.
 3. **Remember**: each incident is embedded (MiniLM, 384 dims) and stored in Supabase pgvector. Similar past incidents are retrieved by cosine similarity.
-4. **Patch**: Claude (Anthropic API) generates a fix, given the incident and code context.
+4. **Patch**: Claude (Anthropic API) generates a fix, given the incident, the source file and similar past incidents.
 5. **Test**: the patch runs against the test suite in a Docker container with no network, a read-only filesystem, and memory/CPU/time limits.
-6. **Review**: a human approves or rejects in the dashboard. Approve is locked unless the sandbox passed.
+6. **Retry**: if the sandbox fails the patch, the failing test output goes back to the LLM and a new patch is generated, up to 3 attempts. Every attempt is stored on the patch.
+7. **Review**: a human approves or rejects in the dashboard. Approve is locked unless the sandbox passed.
+8. **Apply**: only approved, sandbox-passed patches can be applied to the sample app. The original file is backed up first.
+9. **Verify and roll back**: the tests run again against the file on disk. The patch is marked `success`, or the original file is restored and the patch is marked `reverted`.
+
+![Auto-patch, apply and outcome check](docs/screenshots/phase7-auto-apply.png)
 
 ## Tech stack
 
@@ -28,13 +33,14 @@ Ouroboros ingests production errors, classifies them, finds similar past inciden
 
 ## Repo layout
 
+```
 apps/
-backend/ Express API (incidents, patches, metrics)
-dashboard/ React dashboard (feed, patch review, metrics)
-sample-buggy-app/ the “production” app seeded with 4 bug patterns
-infra/ Dockerfile for the sandbox, DB seeds and migrations
-docs/ architecture and demo script
-
+  backend/            Express API (incidents, patches, metrics)
+  dashboard/          React dashboard (feed, patch review, metrics)
+  sample-buggy-app/   the "production" app seeded with 4 bug patterns
+infra/                Dockerfile for the sandbox, DB seeds and migrations
+docs/                 architecture, screenshots and demo script
+```
 
 ## Run it locally
 
@@ -60,16 +66,20 @@ npm run dev               # http://localhost:5173
 | `POST /api/incidents/ingest` | ingest and classify an error |
 | `GET /api/incidents` | list incidents |
 | `GET /api/incidents/:id/similar` | similar past incidents |
-| `POST /api/patches/:id/generate` | generate a patch (incident id) |
+| `POST /api/patches/:id/generate` | generate a single patch (incident id) |
+| `POST /api/patches/:id/auto` | generate and test with up to 3 retries (incident id) |
 | `GET /api/patches/:id` | patches for an incident |
 | `POST /api/patches/:id/test` | run the sandbox test (patch id) |
 | `POST /api/patches/:id/approve` and `/reject` | human review (patch id) |
+| `POST /api/patches/:id/apply` | apply, verify and roll back on failure (patch id) |
 | `GET /api/patches/:id/original` | original file for the diff (patch id) |
 | `GET /api/metrics` | dashboard metrics |
 
 ## Safety
 
-Patches are never applied automatically. Every patch must pass the sandbox tests and be approved by a human. Weak patches are caught: for the profile bug, two of three generated patches dropped a response field and failed the sandbox.
+Patches are never applied without a human decision. Every patch must pass the sandbox tests and be approved before it can be applied, and applying runs the tests a second time against the real file, restoring the original if they fail. A patch that was reverted cannot be re-applied.
+
+The sandbox catches weak patches: for the profile bug, two of three generated patches dropped a response field and failed the tests. With auto-retry, the failure output is fed back so the next attempt can fix it.
 
 ## Status
 
@@ -77,4 +87,5 @@ Patches are never applied automatically. Every patch must pass the sandbox tests
 - [x] Phase 4: LLM patch generation
 - [x] Phase 5: Docker sandbox test runner
 - [x] Phase 6: dashboard, approve/reject, metrics
-- [ ] Phase 7: auto-retry with failure feedback, apply approved patches, outcome check
+- [x] Phase 7: auto-retry with failure feedback, apply approved patches, outcome check with rollback
+- [ ] Phase 8 (optional): Slack bot, postmortem generator
