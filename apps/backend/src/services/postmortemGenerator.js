@@ -26,9 +26,12 @@ ${attempts}
 REVIEW AND OUTCOME
 Sandbox result: ${patch.test_result}
 Human approval: ${patch.approval_status}${patch.review_note ? ` (note: ${patch.review_note})` : ''}
-Deployed: ${patch.deployed}
+Applied to local sample app: ${patch.deployed}
 Final outcome: ${patch.outcome}
 Outcome check: ${patch.outcome_check?.status || 'not run'}
+
+RULES
+The fix was applied to a local sample app and verified only by re-running its test suite. Never say it ran in production or was monitored. Describe the fix as "according to the patch explanation" and do not claim more than the tests verify.
 
 Use exactly these sections: Summary, Impact, Root cause, Fix, Verification, Follow-ups. Keep each section to 1-3 sentences. Under Follow-ups, suggest one concrete way to strengthen the tests or monitoring.`;
 }

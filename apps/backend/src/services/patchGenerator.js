@@ -1,10 +1,11 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { getSourceFileForIncident } = require('./codeContext');
 const { findSimilarIncidents } = require('./incidentEmbedding');
+const { getOutcomeHistory, formatHistory } = require('./outcomeHistory');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-function buildPrompt({ incident, sourceCode, relativePath, similarIncidents, feedback }) {
+function buildPrompt({ incident, sourceCode, relativePath, similarIncidents, feedback, history }) {
   const similarSection = similarIncidents.length
     ? similarIncidents
         .map((s, i) => `${i + 1}. (similarity ${s.similarity.toFixed(3)}) ${s.error_signature}`)
@@ -35,7 +36,7 @@ Stack: ${incident.stack || 'N/A'}
 
 SIMILAR PAST INCIDENTS (for context only, do not copy blindly)
 ${similarSection}
-
+${history || ''}
 SOURCE FILE: ${relativePath}
 \`\`\`javascript
 ${sourceCode}
@@ -71,7 +72,18 @@ async function generatePatch(incident, feedback = null) {
   const { relativePath, code } = getSourceFileForIncident(incident);
   const similarIncidents = await findSimilarIncidents(incident, 3);
 
-  const prompt = buildPrompt({ incident, sourceCode: code, relativePath, similarIncidents, feedback });
+  // lessons from this system's own past outcomes (same bug class); never blocks generation
+  const history = formatHistory(await getOutcomeHistory(incident).catch(() => null));
+  console.log(`Outcome history injected: ${history ? 'yes' : 'none'}`);
+
+  const prompt = buildPrompt({
+    incident,
+    sourceCode: code,
+    relativePath,
+    similarIncidents,
+    feedback,
+    history,
+  });
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
