@@ -6,6 +6,7 @@ const Patch = require('../models/Patch.model');
 const { generatePatch } = require('../services/patchGenerator');
 const { runPatchInSandbox } = require('../services/sandboxRunner');
 const { generateAndTestWithRetry } = require('../services/patchRetry');
+const { generatePostmortem } = require('../services/postmortemGenerator');
 
 // apps/backend/src/controllers -> apps/sample-buggy-app
 const APP_ROOT = path.resolve(__dirname, '../../../sample-buggy-app');
@@ -300,9 +301,32 @@ async function applyPatch(req, res) {
   }
 }
 
+async function createPostmortem(req, res) {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid patch id.' });
+    }
+    const patch = await Patch.findById(req.params.id);
+    if (!patch) return res.status(404).json({ error: 'Patch not found.' });
+
+    const incident = await Incident.findById(patch.incident_id);
+    if (!incident) return res.status(404).json({ error: 'Incident not found.' });
+
+    const content = await generatePostmortem(incident, patch);
+    patch.postmortem = { content, generated_at: new Date() };
+    await patch.save();
+
+    res.json({ success: true, postmortem: patch.postmortem });
+  } catch (err) {
+    console.error('Postmortem error:', err.message);
+    res.status(500).json({ error: 'Failed to generate postmortem.' });
+  }
+}
+
 module.exports = {
   createPatch,
   autoPatch,
+  createPostmortem,
   applyPatch,
   getPatchesForIncident,
   testPatch,

@@ -39,6 +39,10 @@ const PatchSchema = new mongoose.Schema({
     output: String,
     checked_at: Date,
   },
+  postmortem: {
+    content: String,
+    generated_at: Date,
+  },
   deployed: { type: Boolean, default: false },
   outcome: { type: String, enum: ['success', 'reverted', 'pending'], default: 'pending' },
 }, {

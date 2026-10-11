@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createPatch,
   autoPatch,
+  createPostmortem,
   applyPatch,
   getPatchesForIncident,
   testPatch,
@@ -17,6 +18,7 @@ router.post('/:id/approve', approvePatch);     // :id = PATCH id
 router.post('/:id/reject', rejectPatch);       // :id = PATCH id
 router.post('/:id/auto', autoPatch);           // :id = INCIDENT id
 router.post('/:id/apply', applyPatch);         // :id = PATCH id
+router.post('/:id/postmortem', createPostmortem); // :id = PATCH id
 router.get('/:id/original', getPatchOriginal); // :id = PATCH id
 router.get('/:id', getPatchesForIncident);     // :id = incident id
 
