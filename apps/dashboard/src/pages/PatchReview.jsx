@@ -8,6 +8,8 @@ import SimilarIncidents from '../components/SimilarIncidents.jsx';
 
 const errMsg = (e) => e.response?.data?.error || e.message;
 
+const OUTCOME_BADGE = { success: 'resolved', reverted: 'failed', pending: 'new' };
+
 export default function PatchReview() {
   const { id } = useParams(); // incident id
   const [incident, setIncident] = useState(null);
@@ -19,6 +21,12 @@ export default function PatchReview() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
+  const [info, setInfo] = useState(null);
+
+  const loadIncident = useCallback(async () => {
+    const r = await client.get('/incidents');
+    setIncident(r.data.incidents.find((i) => i._id === id) || null);
+  }, [id]);
 
   const loadPatches = useCallback(async () => {
     const r = await client.get(`/patches/${id}`);
@@ -27,30 +35,34 @@ export default function PatchReview() {
   }, [id]);
 
   useEffect(() => {
-    client.get('/incidents')
-      .then((r) => setIncident(r.data.incidents.find((i) => i._id === id) || null))
-      .catch((e) => setError(errMsg(e)));
+    loadIncident().catch((e) => setError(errMsg(e)));
     loadPatches().catch((e) => setError(errMsg(e)));
     setSimilar(null);
     setSimilarError(null);
     client.get(`/incidents/${id}/similar`)
       .then((r) => setSimilar(r.data.similar_incidents || []))
       .catch((e) => { setSimilar([]); setSimilarError(errMsg(e)); });
-  }, [id, loadPatches]);
+  }, [id, loadIncident, loadPatches]);
 
   const patch = patches[selected];
 
   useEffect(() => {
     setOriginal(null);
     if (!patch) return;
+    // once applied, the file on disk IS the patch, so show the saved backup instead
+    if (patch.deployed && patch.original_code) {
+      setOriginal(patch.original_code);
+      return;
+    }
     client.get(`/patches/${patch._id}/original`)
       .then((r) => setOriginal(r.data.original))
       .catch((e) => setOriginal(`// Could not load original file: ${errMsg(e)}`));
-  }, [patch?._id]);
+  }, [patch?._id, patch?.deployed]);
 
   const run = async (label, fn) => {
     setBusy(label);
     setError(null);
+    setInfo(null);
     try { await fn(); } catch (e) { setError(errMsg(e)); }
     setBusy(null);
   };
@@ -58,20 +70,49 @@ export default function PatchReview() {
   const generate = () => run('generate', async () => {
     await client.post(`/patches/${id}/generate`);
     await loadPatches();
+    await loadIncident();
     setSelected(0);
   });
+
+  const autoPatch = () => run('auto', async () => {
+    const r = await client.post(`/patches/${id}/auto`);
+    await loadPatches();
+    await loadIncident();
+    setSelected(0);
+    setInfo(`Auto-patch finished: ${r.data.status} after ${r.data.attempts_used} attempt(s).`);
+  });
+
   const test = () => run('test', async () => {
     await client.post(`/patches/${patch._id}/test`);
     await loadPatches();
+    await loadIncident();
   });
+
   const review = (decision) => run(decision, async () => {
     await client.post(`/patches/${patch._id}/${decision}`, { note });
     setNote('');
     await loadPatches();
   });
 
+  const apply = () => run('apply', async () => {
+    const r = await client.post(`/patches/${patch._id}/apply`);
+    await loadPatches();
+    await loadIncident();
+    setInfo(
+      r.data.outcome === 'success'
+        ? 'Patch applied. Outcome check passed.'
+        : 'Outcome check failed. The file was rolled back to the original.'
+    );
+  });
+
   const pending = patch && (patch.approval_status || 'pending') === 'pending';
   const canApprove = pending && patch.test_result === 'passed';
+  const canApply =
+    patch &&
+    patch.approval_status === 'approved' &&
+    patch.test_result === 'passed' &&
+    !patch.deployed &&
+    patch.outcome !== 'reverted';
 
   return (
     <>
@@ -79,6 +120,7 @@ export default function PatchReview() {
       <h1>Patch review</h1>
 
       {error && <p className="error">{error}</p>}
+      {info && <p className="muted">{info}</p>}
 
       {incident && (
         <div className="card section">
@@ -94,8 +136,11 @@ export default function PatchReview() {
       )}
 
       <div className="toolbar">
-        <button className="btn primary" disabled={busy || !incident?.classified_type} onClick={generate}>
-          {busy === 'generate' ? 'Generating…' : patches.length ? 'Generate another patch' : 'Generate patch'}
+        <button className="btn primary" disabled={busy || !incident?.classified_type} onClick={autoPatch}>
+          {busy === 'auto' ? 'Auto-patching (up to 3 tries)…' : 'Auto-patch (retry on failure)'}
+        </button>
+        <button className="btn" disabled={busy || !incident?.classified_type} onClick={generate}>
+          {busy === 'generate' ? 'Generating…' : patches.length ? 'Generate single patch' : 'Generate patch'}
         </button>
         {patches.length > 1 && (
           <select className="btn" value={selected} onChange={(e) => setSelected(Number(e.target.value))}>
@@ -117,8 +162,25 @@ export default function PatchReview() {
               <span>Confidence: <strong>{patch.confidence_score ?? '—'}</strong></span>
               <span>Sandbox: <TestResultBadge result={patch.test_result} /></span>
               <span>Approval: <span className={`badge ${patch.approval_status === 'approved' ? 'resolved' : patch.approval_status === 'rejected' ? 'failed' : 'new'}`}>{patch.approval_status || 'pending'}</span></span>
+              <span>Outcome: <span className={`badge ${OUTCOME_BADGE[patch.outcome] || 'new'}`}>{patch.outcome || 'pending'}</span></span>
             </div>
           </div>
+
+          {patch.attempts?.length > 0 && (
+            <div className="card section">
+              <div className="label">Generation attempts ({patch.attempts.length})</div>
+              {patch.attempts.map((a) => (
+                <details key={a.attempt}>
+                  <summary>
+                    Attempt {a.attempt} · <TestResultBadge result={a.test_result} />
+                    {' '}· {a.pass ?? '—'} passed, {a.fail ?? '—'} failed
+                  </summary>
+                  {a.explanation && <p className="muted">{a.explanation}</p>}
+                  <pre className="code">{a.output}</pre>
+                </details>
+              ))}
+            </div>
+          )}
 
           {original === null ? <p className="muted">Loading original file…</p> : (
             <DiffViewer oldValue={original} newValue={patch.generated_diff} />
@@ -135,7 +197,7 @@ export default function PatchReview() {
                 <pre className="code">{patch.test_details.output}</pre>
               </>
             ) : <p className="muted">Not tested yet.</p>}
-            <button className="btn" disabled={busy} onClick={test}>
+            <button className="btn" disabled={busy || patch.deployed} onClick={test}>
               {busy === 'test' ? 'Running in Docker…' : patch.test_details?.ran_at ? 'Re-run sandbox test' : 'Run sandbox test'}
             </button>
           </div>
@@ -156,6 +218,30 @@ export default function PatchReview() {
                 {patch.approval_status} {patch.reviewed_at && `on ${formatDate(patch.reviewed_at)}`}
                 {patch.review_note && <span className="muted"> · “{patch.review_note}”</span>}
               </p>
+            )}
+          </div>
+
+          <div className="card section">
+            <div className="label">Apply and outcome check</div>
+            {patch.outcome_check?.checked_at ? (
+              <>
+                <p>
+                  Outcome check: <TestResultBadge result={patch.outcome_check.status} />
+                  {' '}· {patch.outcome_check.pass ?? '—'} passed, {patch.outcome_check.fail ?? '—'} failed
+                  {' '}· {formatDate(patch.outcome_check.checked_at)}
+                </p>
+                {patch.outcome === 'reverted' && (
+                  <p className="muted">The outcome check failed, so the original file was restored. Generate a new patch.</p>
+                )}
+              </>
+            ) : (
+              <p className="muted">Not applied yet.</p>
+            )}
+            <button className="btn primary" disabled={busy || !canApply} onClick={apply}>
+              {busy === 'apply' ? 'Applying and verifying…' : 'Apply to sample app'}
+            </button>
+            {!canApply && !patch.deployed && patch.outcome !== 'reverted' && (
+              <p className="muted">Apply unlocks after the patch is approved.</p>
             )}
           </div>
         </>
