@@ -18,6 +18,7 @@ Ouroboros ingests production errors, classifies them, finds similar past inciden
 7. **Review**: a human approves or rejects in the dashboard. Approve is locked unless the sandbox passed.
 8. **Apply**: only approved, sandbox-passed patches can be applied to the sample app. The original file is backed up first.
 9. **Verify and roll back**: the tests run again against the file on disk. The patch is marked `success`, or the original file is restored and the patch is marked `reverted`.
+10. **Learn and report**: past outcomes (verified fixes, reverted fixes, tests earlier patches failed) are fed into future patch prompts, and Claude can write a plain-English postmortem for any patch.
 
 ![Auto-patch, apply and outcome check](docs/screenshots/phase7-auto-apply.png)
 
@@ -74,6 +75,7 @@ npm run dev               # http://localhost:5173
 | `POST /api/patches/:id/apply` | apply, verify and roll back on failure (patch id) |
 | `GET /api/patches/:id/original` | original file for the diff (patch id) |
 | `GET /api/metrics` | dashboard metrics |
+| `POST /api/patches/:id/postmortem` | generate a plain-English postmortem (patch id) |
 
 ## Safety
 
@@ -88,4 +90,4 @@ The sandbox catches weak patches: for the profile bug, two of three generated pa
 - [x] Phase 5: Docker sandbox test runner
 - [x] Phase 6: dashboard, approve/reject, metrics
 - [x] Phase 7: auto-retry with failure feedback, apply approved patches, outcome check with rollback
-- [ ] Phase 8 (optional): Slack bot, postmortem generator
+- [x] Phase 8: postmortem generator, outcome-history feedback into patch prompts
