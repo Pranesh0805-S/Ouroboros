@@ -9,6 +9,7 @@ const { generateAndTestWithRetry } = require('../services/patchRetry');
 
 // apps/backend/src/controllers -> apps/sample-buggy-app
 const APP_ROOT = path.resolve(__dirname, '../../../sample-buggy-app');
+const TARGET_RE = /^routes\/[A-Za-z0-9_-]+\.js$/;
 
 async function createPatch(req, res) {
   try {
@@ -215,8 +216,6 @@ async function autoPatch(req, res) {
   }
 }
 
-const TARGET_RE = /^routes\/[A-Za-z0-9_-]+\.js$/;
-
 async function applyPatch(req, res) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -235,6 +234,9 @@ async function applyPatch(req, res) {
     if (patch.deployed) {
       return res.status(409).json({ error: 'Patch already applied.' });
     }
+    if (patch.outcome === 'reverted') {
+      return res.status(409).json({ error: 'Patch was reverted; generate a new one.' });
+    }
     if (!TARGET_RE.test(patch.target_file)) {
       return res.status(400).json({ error: 'Invalid target_file.' });
     }
@@ -244,23 +246,54 @@ async function applyPatch(req, res) {
       return res.status(400).json({ error: 'Invalid target_file.' });
     }
 
-    // back up the original so Part 3 can roll back
+    // back up the original so we can roll back
     patch.original_code = await fs.promises.readFile(full, 'utf8');
     await fs.promises.writeFile(full, patch.generated_diff, 'utf8');
 
-    patch.deployed = true;
-    patch.deployed_at = new Date();
-    patch.outcome = 'pending'; // Part 3 sets success / reverted
+    // outcome check: re-run the sandbox against what is actually on disk
+    let check;
+    try {
+      const onDisk = await fs.promises.readFile(full, 'utf8');
+      check = await runPatchInSandbox({
+        targetFile: patch.target_file,
+        patchedContent: onDisk,
+      });
+    } catch (err) {
+      check = { status: 'error', output: err.message };
+    }
+
+    patch.outcome_check = {
+      status: check.status,
+      pass: check.pass,
+      fail: check.fail,
+      output: check.output,
+      checked_at: new Date(),
+    };
+
+    if (check.status === 'passed') {
+      patch.deployed = true;
+      patch.deployed_at = new Date();
+      patch.outcome = 'success';
+      await Incident.findByIdAndUpdate(
+        patch.incident_id,
+        { status: 'resolved' },
+        { runValidators: true }
+      );
+    } else {
+      // roll back to the original file
+      await fs.promises.writeFile(full, patch.original_code, 'utf8');
+      patch.deployed = false;
+      patch.outcome = 'reverted';
+      await Incident.findByIdAndUpdate(
+        patch.incident_id,
+        { status: 'patched' },
+        { runValidators: true }
+      );
+    }
     await patch.save();
 
-    await Incident.findByIdAndUpdate(
-      patch.incident_id,
-      { status: 'resolved' },
-      { runValidators: true }
-    );
-
-    console.log(`Patch ${patch._id} applied to ${patch.target_file}`);
-    res.json({ success: true, patch });
+    console.log(`Patch ${patch._id} outcome: ${patch.outcome}`);
+    res.json({ success: patch.outcome === 'success', outcome: patch.outcome, patch });
   } catch (err) {
     console.error('Apply patch error:', err.message);
     res.status(500).json({ error: 'Failed to apply patch.' });
@@ -269,11 +302,11 @@ async function applyPatch(req, res) {
 
 module.exports = {
   createPatch,
+  autoPatch,
   applyPatch,
   getPatchesForIncident,
   testPatch,
   approvePatch,
   rejectPatch,
   getPatchOriginal,
-  autoPatch,
 };
