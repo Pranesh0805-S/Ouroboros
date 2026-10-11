@@ -105,6 +105,11 @@ export default function PatchReview() {
     );
   });
 
+  const postmortem = () => run('postmortem', async () => {
+    await client.post(`/patches/${patch._id}/postmortem`);
+    await loadPatches();
+  });
+
   const pending = patch && (patch.approval_status || 'pending') === 'pending';
   const canApprove = pending && patch.test_result === 'passed';
   const canApply =
@@ -243,6 +248,23 @@ export default function PatchReview() {
             {!canApply && !patch.deployed && patch.outcome !== 'reverted' && (
               <p className="muted">Apply unlocks after the patch is approved.</p>
             )}
+          </div>
+
+          <div className="card section">
+            <div className="label">Postmortem</div>
+            {patch.postmortem?.content ? (
+              <>
+                <pre className="code" style={{ whiteSpace: 'pre-wrap' }}>{patch.postmortem.content}</pre>
+                <p className="muted">Generated {formatDate(patch.postmortem.generated_at)}</p>
+              </>
+            ) : (
+              <p className="muted">No postmortem yet.</p>
+            )}
+            <button className="btn" disabled={busy} onClick={postmortem}>
+              {busy === 'postmortem'
+                ? 'Writing postmortem…'
+                : patch.postmortem?.content ? 'Regenerate postmortem' : 'Generate postmortem'}
+            </button>
           </div>
         </>
       )}
